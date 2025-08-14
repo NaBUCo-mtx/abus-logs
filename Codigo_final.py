@@ -6,10 +6,12 @@ from open_image_models import LicensePlateDetector
 from fast_plate_ocr import LicensePlateRecognizer
 from flask import Flask, render_template_string, send_from_directory, send_file
 
+# --- ADD PICAMERA2 IMPORT ---
+from picamera2 import Picamera2
+
 # --- CONFIGURATION ---
 IMAGE_FOLDER = "detected_plates"
 CSV_FILE = "placas.csv"
-CAMERA_INDEX = 0  # Default camera
 
 # --- SETUP ---
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
@@ -75,21 +77,25 @@ def download_csv():
 
 # --- MAIN LOOP ---
 def main_loop():
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("No camera frame.")
-            continue
+    picam2 = Picamera2()
+    picam2.start()
+    import time
+    time.sleep(2)  # Give camera time to warm up
 
-        predictions = plate_detector.predict(frame)
+    while True:
+        frame = picam2.capture_array()
+        # Convert to BGR if needed (picamera2 returns RGB by default)
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        predictions = plate_detector.predict(frame_bgr)
         if not predictions:
+            cv2.waitKey(100)
             continue
 
         for pred in predictions:
             bbox = pred.bounding_box
             x1, y1, x2, y2 = int(bbox.x1), int(bbox.y1), int(bbox.x2), int(bbox.y2)
-            plate_roi = frame[y1:y2, x1:x2]
+            plate_roi = frame_bgr[y1:y2, x1:x2]
             if plate_roi.size == 0:
                 continue
             # Resize and convert for recognizer
@@ -104,7 +110,7 @@ def main_loop():
                     time_str = now.strftime("%H-%M-%S")
                     filename = f"{plate}_{date_str}_{time_str}.jpg"
                     filepath = os.path.join(IMAGE_FOLDER, filename)
-                    cv2.imwrite(filepath, frame)
+                    cv2.imwrite(filepath, frame_bgr)
                     # Log to CSV
                     with open(CSV_FILE, "a") as f:
                         f.write(f"{plate},{date_str},{time_str},{filename}\n")
